@@ -71,16 +71,16 @@ def moveJoint(jnum, ang, speedtime):
 # Define the main function
 def main():
     # Define inputs for jacobian_inverse function
-    Rd = np.array([[0, 0, -1], 
-                   [0, -1, 0], 
-                   [-1, 0, 0]])
-    Pd = np.array([[0], [0], [0.4]])
+    Rd = np.array([[0.0, 0.0, -1.0], 
+                   [0.0, -1.0, 0.0], 
+                   [-1.0, 0.0, 0.0]])
+    Pd = np.array([[0.0], [0.0], [0.4]])
 
     # Make sure q0 is in radians
     q0 = np.array([25, 50, 75, 30, 30]) * math.pi / 180
 
     tol = np.array([0.02, 0.02, 0.02, 0.001, 0.001, 0.001])
-    Nmax = 100000
+    Nmax = 200
     alpha = 0.1
 
     # Define all the joint lengths [m]
