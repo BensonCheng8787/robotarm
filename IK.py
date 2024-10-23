@@ -10,55 +10,61 @@ Arm = Arm_Device()  # Get DOFBOT object
 time.sleep(.2)  # Pause for a short time
 
 # Define the Jacobian inverse 
-def jacobian_inverse(robot, q0, Rd, Pd, Nmax, alpha, tol):
-    # Set up storage space
+def jacobian_inverse(robot,q0,Rd,Pd,Nmax,alpha,tol):
+# the inputs are 
+# robot: of the Robot class defined in rox. contains rotation axes, position vectors, joint types
+# q0: the initial guess joint angles as a 5x1 numpy array
+# Rd: the desired 3x3 rotation matrix (R_{0T}) as a numpy array
+# Pd: the desired 3x1 position vector (P_{0T}) as a numpy array
+# Nmax: the maximum number of allowed iterations
+# alpha: the update parameter
+# tol: the tolerances for [roll, pitch, yaw, x, y, z] as a 6x1 numpy array
+
+    # set up storage space
     n = len(q0)
-    q = np.zeros((n, Nmax + 1))
-    q[:, 0] = q0
-    p0T = np.zeros((3, Nmax + 1))
-    RPY0T = np.zeros((3, Nmax + 1))
+    q = np.zeros((n,Nmax+1))
+    q[:,0] = q0
+    p0T = np.zeros((3,6))
+    RPY0T = np.zeros((3,Nmax+1))
     iternum = 0
 
-    # Compute the initial forward kinematics
-    H = rox.fwdkin(robot, q[:, 0])
+    # compute the forward kinematics
+    H = rox.fwdkin(robot,q[:, 0])
     R = H.R
     P = H.p
     P = np.array([[P[0]], [P[1]], [P[2]]])
 
-    # Get the initial error
+    # get the initial error
     dR = np.matmul(R, np.transpose(Rd))
     r = np.array(rox.R2rpy(dR))[None]
-    dX = np.concatenate((np.transpose(r), P - Pd))
+    dX = np.concatenate((np.transpose(r), P-Pd))
 
-    # Iterate while any error element is greater than its tolerance
+# iterate while any error element is greater than its tolerance
     while (np.absolute(dX) > tol).any():
-        # Stop execution if the maximum number of iterations is exceeded
+# stop execution if the maximum number of iterations is exceeded
         if iternum < Nmax:
-            # Compute the forward kinematics for the current iteration
-            H = rox.fwdkin(robot, q[:, iternum])
+# compute the forward kinematics
+            H = rox.fwdkin(robot, q[:,iternum])
             R = H.R
             p0T = H.p
             p0T = np.array([[p0T[0]], [p0T[1]], [p0T[2]]])
 
-            # Compute the error
+# compute the error
             dR = np.matmul(R, np.transpose(Rd))
             r = np.array(rox.R2rpy(dR))[None]
-            dX = np.concatenate((np.transpose(r), p0T - Pd))
+            dX = np.concatenate((np.transpose(r), p0T-Pd))
 
-            # Calculate the Jacobian matrix
+# calculate the Jacobian matrix
             Jq = rox.robotjacobian(robot, q[:, iternum])
-
-            # Compute the update
+# compute the update
             j = np.matmul(np.linalg.pinv(Jq), dX)
-
-            # Update the joint angles
-            q[:, iternum + 1] = q[:, iternum] - np.transpose(alpha * j)
-
-            iternum += 1
+# use the update to generate a new q
+            q[:, iternum+1] = q[:, iternum] - np.transpose((alpha * j))
+            q[:, iternum+1] = np.maximum(q[:, iternum + 1], 0)
+            iternum = iternum + 1
         else:
             break
-
-    # Return the final estimate of q
+# return the final estimate of q
     return q[:, iternum]
 
 def moveJoint(jnum, ang, speedtime):
@@ -70,17 +76,42 @@ def moveJoint(jnum, ang, speedtime):
 
 # Define the main function
 def main():
-    # Define inputs for jacobian_inverse function
-    Rd = np.array([[0.0, 0.0, -1.0], 
-                   [0.0, -1.0, 0.0], 
-                   [-1.0, 0.0, 0.0]])
-    Pd = np.array([[0.0], [0.0], [0.4]])
-
-    # Make sure q0 is in radians
-    q0 = np.array([25, 50, 75, 30, 30]) * math.pi / 180
-
-    tol = np.array([0.02, 0.02, 0.02, 0.001, 0.001, 0.001])
-    Nmax = 200
+    #define inputs for jacobian_inverse function
+    
+    #Config1 [90 90 45 90 90])
+    Rd1 = np.array([[0.00, -0.00, -1.00],
+                [-0.71, -0.71, 0.00],
+                [-0.71, 0.71, -0.00]])
+    Pd1 = np.array([[0.0], [0.15], [0.34]])
+    
+    #Config2 [50 50 50 50 50]
+    Rd2 = np.array([[-0.56, -0.25, -0.79],
+                [-0.66, 0.71, 0.25],
+                [0.50, 0.66, -0.56]])
+    Pd2 = np.array([[0.16], [0.19], [0.12]])
+    
+    #Config3 [90 90 90 90 90]
+    Rd3 = np.array([[-0.00, -0.00, -1.00],
+                [-0.00, -1.00, 0.00],
+                [-1.00, 0.00, 0.00]])
+    Pd3 = np.array([[0.0], [0.0], [0.4]])
+    
+    #Config4 [90 45 135 135 90]
+    Rd4 = np.array([[0.00, -0.00, -1.00],
+                [0.71, -0.71, 0.00],
+                [-0.71, -0.71, 0.00]])
+    Pd4 = np.array([[-0.0], [-0.03], [0.34]])
+    
+    #Config5 [90 0 180 0 90]
+    Rd5 = np.array([[-0.00, -0.00, -1.00],
+                [-1.00, 0.00, 0.00],
+                [0.00, 1.00, -0.00]])
+    Pd5 = np.array([[0.0], [0.21], [0.19]])
+    # make sure q0 is in radians
+    q0 = np.array(np.transpose([25, 50, 75, 30, 30]))*math.pi/180
+    
+    tol = np.array(np.transpose([[0.02, 0.02, 0.02, 0.001, 0.001, 0.001]]))
+    Nmax = 1000
     alpha = 0.1
 
     # Define all the joint lengths [m]
@@ -91,7 +122,7 @@ def main():
     l4 = 73.85 * 10**-3
     l5 = 54.57 * 10**-3
 
-    # Define the unit vectors
+    # define the unit vectors
     ex = np.array([1, 0, 0])
     ey = np.array([0, 1, 0])
     ez = np.array([0, 0, 1])
@@ -100,28 +131,26 @@ def main():
     P01 = (l0 + l1) * ez
     P12 = np.zeros(3)
     P23 = l2 * ex
-    P34 = -1 * l3 * ez
+    P34 = -1*l3 * ez
     P45 = np.zeros(3)
-    P5T = -1 * (l4 + l5) * ex
+    P5T = -1*(l4 + l5) * ex
 
-    # Define the class inputs: rotation axes (H), position vectors (P), and joint_type
-    H = np.array([ez, -1 * ey, -1 * ey, -1 * ey, -1 * ex]).T
+    # define the class inputs: rotation axes (H), position vectors (P), and joint_type
+    H = np.array([ez, -1*ey, -1*ey, -1*ey, -1*ex]).T
     P = np.array([P01, P12, P23, P34, P45, P5T]).T
-    joint_type = [0, 0, 0, 0, 0]
+    joint_type = [0,0,0,0,0]
 
-    # Define the Robot class
+# define the Robot class
     robot = rox.Robot(H, P, joint_type)
 
-    # Compute the inverse kinematics
-    q = jacobian_inverse(robot, q0, Rd, Pd, Nmax, alpha, tol)
-
-    # Convert solution to degrees
+# compute the inverse kinematics
+    q = jacobian_inverse(robot,q0,Rd5,Pd5,Nmax,alpha,tol)
+# convert solution to degrees
     q = q * 180 / math.pi
-    q = q % 360
-
+    q = q%360
     # Move the robot joints
     for i in range(1, 6):
-        moveJoint(i, q[i - 1], 100)
+        moveJoint(i, q[i-1], 100)
         time.sleep(0.2)
 
     # Print the final joint angles
