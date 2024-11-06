@@ -1,0 +1,119 @@
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+import csv
+import time
+from Arm_Lib import Arm_Device
+# [Previous functions remain the same: rotx, roty, rotz, fwdkin_Dofbot, rotm2euler, wrap_to_180]
+
+
+Arm = Arm_Device()
+
+    
+# Function to move the specified joint to a given angle
+def moveJoint(jnum, ang, speedtime):
+    """
+    Move the specified joint to the given position.
+    """
+    Arm.Arm_serial_servo_write(jnum, ang, speedtime)
+    return
+
+# Load the joint angles and lambda values from the CSV file
+def load_joint_data(filename):
+    joint_data = []
+    with open(filename, mode='r') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            # Extract lambda, qdesired, and q as lists of floats
+            row_data = {
+                'lambda': float(row['λ']),
+                'qdesired': [float(x) for x in row['qdesired(λ)'].strip('[]').split(', ')],
+                'q': [float(x) for x in row['q(λ)'].strip('[]').split(', ')]
+            }
+            joint_data.append(row_data)
+    return joint_data
+
+# Main function to execute the movement sequence
+def move_robot_sequence(joint_data):
+    # Initial setup
+    Tstart = time.time()
+    Qmeasure = []
+    T = []
+
+    # Move to initial joint configuration (first row)
+    initial_angles = joint_data[0]['q']
+    for jnum, angle in enumerate(initial_angles):
+        moveJoint(jnum, angle, 800)  # Adjust speedtime as needed
+    time.sleep(2)  # Wait for the robot to reach the initial position
+
+    # Log initial joint measurement and time
+    Qmeasure.append(initial_angles)  # Assuming readJointAngles gives initial joint config
+    T.append(time.time() - Tstart)
+
+    # Move through each angle set in the joint data
+    for data in enumerate(joint_data[1:], start=1):
+        qcommand = data[1]['qdesired']
+        i = 1
+        print(qcommand)
+        for angle in qcommand:
+            moveJoint(i, angle, 50)  # Adjust speedtime as needed
+            i+=1
+        ##time.sleep(0.01)  # Wait a small time between moves
+
+        # Log measured joint angles and time
+        Qmeasure.append(qcommand)  # Assuming actual movement equals commanded
+        T.append(time.time() - Tstart)
+        #time.sleep(1)  # Adjust as needed for timing
+
+    return Qmeasure, T
+
+
+
+
+if __name__ == "__main__":
+    # Define start and end configurations (example values)
+    qstart = np.array([90., 90., 90., 90., 90.])  # Modified to match your data
+    qend = np.array([90., 75., 60., 30., 0.])
+    
+    N = 250
+    lambda_vals = np.linspace(0, 1, N)
+    
+    # Pre-allocate arrays
+    q = np.zeros((5, N))
+    Rot = np.zeros((3, 3, N))
+    eulerot = np.zeros((3, N))
+    Pot = np.zeros((3, N))
+    qset = []
+    
+    # Generate path
+    for ii in range(N):
+        q[:, ii] = (1 - lambda_vals[ii]) * qstart + lambda_vals[ii] * qend
+        Rot[:, :, ii], Pot[:, ii] = fwdkin_Dofbot(q[:, ii])
+        eulerot[:, ii] = wrap_to_180(rotm2euler(Rot[:, :, ii]) * 180 / np.pi)
+    
+    # Write to CSV with specific formatting
+    with open('data.csv', mode='w', newline='') as output:
+        writer = csv.writer(output)
+        # Write header
+        writer.writerow(['', 'λ', 'qdesired(λ)', 'q(λ)'])
+        
+        # Write data for each point
+        for i in range(N):
+            qdesired = (1 - lambda_vals[i]) * qstart + lambda_vals[i] * qend
+            qactual = q[:, i]
+            
+            # Format arrays with square brackets
+            qdesired_str = f"[{', '.join([str(round(x)) for x in qdesired])}]"
+            qactual_str = f"[{', '.join([str(round(x)) for x in qactual])}]"
+            
+            writer.writerow([i+1, round(lambda_vals[i], 3), qdesired_str, qactual_str])
+    
+    print(f"Data written to data.csv")
+    
+    # Load data from CSV and execute the sequence
+    filename = './data.csv'  # Replace with the actual path to your CSV file
+    joint_data = load_joint_data(filename)
+    Qmeasure, T = move_robot_sequence(joint_data)
+
+    # Display the results (optional)
+    print("Measured joint angles:", Qmeasure)
+    print("Timestamps:", T)
