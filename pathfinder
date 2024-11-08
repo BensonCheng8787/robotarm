@@ -71,85 +71,73 @@ def moveJoint(jnum, ang, speedtime):
     Arm.Arm_serial_servo_write(jnum, ang, speedtime)
     return
 
-def load_joint_data(filename):
-    joint_data = []
-    with open(filename, mode='r') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            row_data = {
-                'lambda': float(row['λ']),
-                'qdesired': [float(x) for x in row['qdesired(λ)'].strip('[]').split(', ')],
-                'q': [float(x) for x in row['q(λ)'].strip('[]').split(', ')]
-            }
-            joint_data.append(row_data)
-    return joint_data
-
 def readAllActualJointAngles(Arm):
-    return np.array([Arm.Arm_serial_servo_read(1), Arm.Arm_serial_servo_read(2), 
-                     Arm.Arm_serial_servo_read(3), Arm.Arm_serial_servo_read(4), 
-                     Arm.Arm_serial_servo_read(5)])
+    # Retrieve joint angles, replacing None values with 0.0 if they occur
+    q = [Arm.Arm_serial_servo_read(jnum) for jnum in range(1, 6)]
+    return np.array([angle if angle is not None else 0.0 for angle in q])
 
-# Main function to execute the movement sequence
-def move_robot_sequence(joint_data):
+# Generate the path and move the robot accordingly
+def move_robot_sequence(qstart, qend, N=250):
+    lambda_vals = np.linspace(0, 1, N)
+    q_path = np.zeros((5, N))  # Store calculated joint angles
     Tstart = time.time()
-    Qmeasure = []
-    T = []
+    Qmeasure = []  # Measured joint angles
+    T = []  # Timestamps
 
-    # Move to initial joint configuration
-    initial_angles = joint_data[0]['q']
+    # Generate the path
+    for ii in range(N):
+        q_path[:, ii] = (1 - lambda_vals[ii]) * qstart + lambda_vals[ii] * qend
+
+    # Move to initial joint configuration (first point)
+    initial_angles = q_path[:, 0]
     for jnum, angle in enumerate(initial_angles):
-        moveJoint(jnum, angle, 800)
-    time.sleep(2)
+        moveJoint(jnum + 1, angle, 800)
+    time.sleep(2)  # Allow time for reaching initial position
 
+    # Log initial measurement and time
     Qmeasure.append(readAllActualJointAngles(Arm))
     T.append(time.time() - Tstart)
 
-    for data in joint_data[1:]:
-        qcommand = data['qdesired']
-        for jnum, angle in enumerate(qcommand):
-            moveJoint(jnum + 1, angle, 200)
-        
-        time.sleep(0.01)
+    # Move through the generated path
+    for idx, qdesired in enumerate(q_path.T[1:], start=1):  # Skip the first point
+        for jnum, angle in enumerate(qdesired):
+            moveJoint(jnum + 1, angle, 200)  # Set movement speed
+        time.sleep(0.01)  # Small delay between movements
+
+        # Log measured angles and time for each step
         Qmeasure.append(readAllActualJointAngles(Arm))
         T.append(time.time() - Tstart)
 
-    return Qmeasure, T
+    return q_path, Qmeasure, T, lambda_vals
 
 if __name__ == "__main__":
+    # Define start and end configurations
     qstart = np.array([90., 90., 90., 90., 90.])
-    qend = np.array([45., 70., 60., 30., 0.])
-    N = 250
-    lambda_vals = np.linspace(0, 1, N)
-    q = np.zeros((5, N))
+    qend = np.array([0., 210., -10., 120., 0.])
+    N = 250  # Number of path points
 
-    for ii in range(N):
-        q[:, ii] = (1 - lambda_vals[ii]) * qstart + lambda_vals[ii] * qend
+    # Execute movement and capture data
+    q_path, Qmeasure, T, lambda_vals = move_robot_sequence(qstart, qend, N)
+    Qmeasure = np.array(Qmeasure).T  # Transpose for plotting
 
+    # Save data to CSV
     with open('combined_data.csv', mode='w', newline='') as output:
         writer = csv.writer(output)
         writer.writerow(['', 'λ', 'qdesired(λ)', 'q(λ)', 'Timestamp'])
         
-        joint_data = load_joint_data('data.csv')
-        Qmeasure, T = move_robot_sequence(joint_data)
-        
-        measured_angles_matrix = np.array(Qmeasure).T
-        calculated_angles_matrix = q
-
-        for i, (timestamp, measured_angles) in enumerate(zip(T, Qmeasure)):
-            qdesired = (1 - lambda_vals[i]) * qstart + lambda_vals[i] * qend
-            measured_angles = np.array([x if x is not None else 0 for x in measured_angles])  # Replace None with 0 if needed
-            
+        for i, (timestamp, measured_angles, qdesired) in enumerate(zip(T, Qmeasure.T, q_path.T)):
             qdesired_str = f"[{', '.join([str(round(x)) for x in qdesired])}]"
-            measured_str = f"[{', '.join([str(round(x, 2)) for x in measured_angles])}]"
+            # Handle None values in measured angles by replacing with "0.0" if they occur
+            measured_str = f"[{', '.join([str(round(x, 2)) if x is not None else '0.0' for x in measured_angles])}]"
             writer.writerow([i + 1, round(lambda_vals[i], 3), qdesired_str, measured_str, round(timestamp, 3)])
 
     print("Data saved to combined_data.csv")
 
-    # Plotting the measured vs calculated angles for each joint
+    # Plot measured vs calculated angles for each joint
     for joint in range(5):
         plt.figure(figsize=(10, 6))
-        plt.plot(lambda_vals, calculated_angles_matrix[joint, :], label=f'Joint {joint + 1} Calculated Angle')
-        plt.plot(lambda_vals, measured_angles_matrix[joint, :], label=f'Joint {joint + 1} Measured Angle', linestyle='--')
+        plt.plot(lambda_vals, q_path[joint, :], label=f'Joint {joint + 1} Calculated Angle')
+        plt.plot(lambda_vals, Qmeasure[joint, :], label=f'Joint {joint + 1} Measured Angle', linestyle='--')
         plt.xlabel("Lambda (Path Progress)")
         plt.ylabel("Angle (degrees)")
         plt.title(f"Measured vs Calculated Angles for Joint {joint + 1}")
